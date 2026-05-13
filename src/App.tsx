@@ -21,7 +21,8 @@ import {
   Redo2,
   ClipboardPaste,
   Share2,
-  GripVertical
+  GripVertical,
+  ChevronDown
 } from 'lucide-react';
 import { auth, signIn, signOut } from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -38,6 +39,15 @@ function cn(...inputs: ClassValue[]) {
 
 const VOICES: VoiceName[] = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
 
+const VOICE_LABELS: Record<VoiceName, string> = {
+  Puck: 'Puck (Nam ấm áp)',
+  Charon: 'Charon (Nam trầm)',
+  Kore: 'Kore (Nữ trong trẻo)',
+  Fenrir: 'Fenrir (Nam mạnh mẽ)',
+  Zephyr: 'Zephyr (Nữ tự tin)'
+};
+
+
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [sessions, setSessions] = useState<ReadingSession[]>([]);
@@ -49,6 +59,8 @@ export default function App() {
   const [isCloning, setIsCloning] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [isVoiceDropdownOpen, setIsVoiceDropdownOpen] = useState(false);
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [showVoiceManager, setShowVoiceManager] = useState(false);
@@ -150,6 +162,39 @@ export default function App() {
   const fetchVoices = async () => {
     const v = await getVoices();
     setVoices(v);
+  };
+
+  const handleInlineVoicePreview = async (e: React.MouseEvent, voiceName: VoiceName, clonedVoiceId?: string) => {
+    e.stopPropagation();
+    if (previewingVoiceId) return; // Prevent multiple previews at once
+    
+    setPreviewingVoiceId(clonedVoiceId || voiceName);
+    try {
+      const text = "Xin chào, đây là giọng đọc tiếng Việt.";
+      const settingsWithClone: any = { voice: voiceName, speed: 1, pitch: 1 };
+      
+      if (clonedVoiceId) {
+        const voice = voices.find(v => v.id === clonedVoiceId);
+        if (voice) {
+          settingsWithClone.voiceSampleBase64 = voice.sampleBase64;
+          // We could also just play the base64 directly:
+          // const audio = new Audio(`data:audio/mp3;base64,${voice.sampleBase64}`);
+          // Nhưng để đồng nhất, ta sẽ dùng TTS test. Hoặc trực tiếp base64 cho nhanh.
+          const audio = new Audio(`data:audio/mp3;base64,${voice.sampleBase64}`);
+          audio.onended = () => setPreviewingVoiceId(null);
+          audio.play();
+          return;
+        }
+      }
+
+      const url = await generateAudioFromText(text, settingsWithClone);
+      const audio = new Audio(url);
+      audio.onended = () => setPreviewingVoiceId(null);
+      audio.play();
+    } catch (error) {
+      console.error(error);
+      setPreviewingVoiceId(null);
+    }
   };
 
   const handleQuickVoicePreview = async () => {
@@ -920,32 +965,87 @@ export default function App() {
                           )}
                         </AnimatePresence>
 
-                        <select 
-                          className="w-full bg-slate-900/50 border border-white/10 rounded-lg py-2 px-3 text-sm text-white focus:ring-1 focus:ring-purple-500 outline-none backdrop-blur-md"
-                          value={activeSession.settings.clonedVoiceId || activeSession.settings.voice}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const isCloned = voices.some(v => v.id === val);
-                            if (isCloned) {
-                              setActiveSession({...activeSession, settings: {...activeSession.settings, voice: 'Kore', clonedVoiceId: val}});
-                            } else {
-                              setActiveSession({...activeSession, settings: {...activeSession.settings, voice: val as VoiceName, clonedVoiceId: undefined}});
-                            }
-                          }}
-                        >
-                          <optgroup label="Hệ thống">
-                            {VOICES.map((v) => (
-                              <option key={v} value={v} className="bg-slate-900">{v}</option>
-                            ))}
-                          </optgroup>
-                          {voices.length > 0 && (
-                            <optgroup label="Đã nhân bản">
-                              {voices.map((v) => (
-                                <option key={v.id} value={v.id} className="bg-slate-900">Clone: {v.name}</option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </select>
+                        <div className="relative">
+                          <button
+                            onClick={() => setIsVoiceDropdownOpen(!isVoiceDropdownOpen)}
+                            className="w-full flex items-center justify-between bg-slate-900/50 border border-white/10 hover:border-purple-500/50 rounded-lg py-2 px-3 text-sm text-white focus:outline-none backdrop-blur-md transition-colors"
+                          >
+                            <span className="truncate pr-2">
+                              {activeSession.settings.clonedVoiceId 
+                                ? `Nhân bản: ${voices.find(v => v.id === activeSession.settings.clonedVoiceId)?.name || 'Vô danh'}` 
+                                : VOICE_LABELS[activeSession.settings.voice]}
+                            </span>
+                            <ChevronDown className={cn("w-4 h-4 text-slate-400 shrink-0 transition-transform", isVoiceDropdownOpen && "rotate-180")} />
+                          </button>
+                          
+                          <AnimatePresence>
+                            {isVoiceDropdownOpen && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="absolute z-50 left-0 right-0 top-full mt-2 bg-slate-800 border border-white/10 rounded-lg shadow-xl shadow-black/50 overflow-hidden max-h-60 overflow-y-auto custom-scrollbar"
+                              >
+                                <div className="p-1">
+                                  <div className="px-2 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Hệ thống</div>
+                                  {VOICES.map((v) => (
+                                    <div 
+                                      key={v}
+                                      className={cn(
+                                        "flex items-center justify-between px-2 py-2 rounded-md cursor-pointer transition-colors group",
+                                        activeSession.settings.voice === v && !activeSession.settings.clonedVoiceId ? "bg-purple-500/20 text-purple-300" : "hover:bg-white/5 text-slate-300"
+                                      )}
+                                      onClick={() => {
+                                        setActiveSession({...activeSession, settings: {...activeSession.settings, voice: v, clonedVoiceId: undefined}});
+                                        setIsVoiceDropdownOpen(false);
+                                      }}
+                                    >
+                                      <span className="text-sm truncate">{VOICE_LABELS[v]}</span>
+                                      <button 
+                                        className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-500/50 bg-black/20 text-slate-300 hover:text-white transition-colors"
+                                        title="Nghe thử"
+                                        onClick={(e) => handleInlineVoicePreview(e, v)}
+                                      >
+                                        {previewingVoiceId === v ? <Loader2 className="w-3 h-3 animate-spin"/> : <Play className="w-3 h-3 translate-x-[1px]" />}
+                                      </button>
+                                    </div>
+                                  ))}
+
+                                  {voices.length > 0 && (
+                                    <>
+                                      <div className="px-2 py-1.5 mt-2 text-xs font-semibold text-slate-400 uppercase tracking-wider border-t border-white/5">Đã nhân bản</div>
+                                      {voices.map((v) => (
+                                        <div 
+                                          key={v.id}
+                                          className={cn(
+                                            "flex items-center justify-between px-2 py-2 rounded-md cursor-pointer transition-colors group",
+                                            activeSession.settings.clonedVoiceId === v.id ? "bg-purple-500/20 text-purple-300" : "hover:bg-white/5 text-slate-300"
+                                          )}
+                                          onClick={() => {
+                                            setActiveSession({...activeSession, settings: {...activeSession.settings, voice: 'Kore', clonedVoiceId: v.id}});
+                                            setIsVoiceDropdownOpen(false);
+                                          }}
+                                        >
+                                          <div className="flex items-center gap-2 truncate">
+                                            <Mic className="w-3 h-3 text-blue-400 shrink-0" />
+                                            <span className="text-sm truncate">{v.name}</span>
+                                          </div>
+                                          <button 
+                                            className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-500/50 bg-black/20 text-slate-300 hover:text-white transition-colors shrink-0"
+                                            title="Nghe thử"
+                                            onClick={(e) => handleInlineVoicePreview(e, 'Kore', v.id!)}
+                                          >
+                                            {previewingVoiceId === v.id ? <Loader2 className="w-3 h-3 animate-spin"/> : <Play className="w-3 h-3 translate-x-[1px]" />}
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
                       </div>
 
                       <div className="space-y-4">
