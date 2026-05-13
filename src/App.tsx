@@ -62,6 +62,21 @@ export default function App() {
   const lastSavedTextRef = useRef('');
   const typingTimeoutRef = useRef<any>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const autoSaveTimeoutRef = useRef<any>(null);
+
+  const debounceAutoSave = (sessionId: string, pages: any[], settings: any) => {
+    // Prevent auto-saving if user does not own the session
+    if (user?.uid !== activeSession?.userId) return;
+    
+    if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await updateSession(sessionId, pages, settings);
+      } catch (err) {
+        console.error("Auto save failed", err);
+      }
+    }, 1500);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -188,6 +203,8 @@ export default function App() {
         lastSavedTextRef.current = text;
       }
     }, 1000);
+    
+    debounceAutoSave(activeSession.id!, newPages, activeSession.settings);
   };
 
   const handleUndo = () => {
@@ -212,6 +229,7 @@ export default function App() {
     const newPages = [...activeSession.pages];
     newPages[currentPage] = { ...newPages[currentPage], text: previousText };
     setActiveSession({ ...activeSession, pages: newPages });
+    debounceAutoSave(activeSession.id!, newPages, activeSession.settings);
   };
 
   const handleRedo = () => {
@@ -229,6 +247,7 @@ export default function App() {
     const newPages = [...activeSession.pages];
     newPages[currentPage] = { ...newPages[currentPage], text: nextText };
     setActiveSession({ ...activeSession, pages: newPages });
+    debounceAutoSave(activeSession.id!, newPages, activeSession.settings);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
