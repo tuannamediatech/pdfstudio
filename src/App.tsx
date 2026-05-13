@@ -18,7 +18,8 @@ import {
   Waves,
   Plus,
   Undo2,
-  Redo2
+  Redo2,
+  ClipboardPaste
 } from 'lucide-react';
 import { auth, signIn, signOut } from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -58,6 +59,7 @@ export default function App() {
   const [redoStack, setRedoStack] = useState<string[]>([]);
   const lastSavedTextRef = useRef('');
   const typingTimeoutRef = useRef<any>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (activeSession) {
@@ -223,6 +225,31 @@ export default function App() {
 
   const canUndo = !!activeSession && (undoStack.length > 0 || (activeSession.pages[currentPage]?.text !== lastSavedTextRef.current));
   const canRedo = !!activeSession && redoStack.length > 0;
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && textAreaRef.current) {
+        const start = textAreaRef.current.selectionStart;
+        const end = textAreaRef.current.selectionEnd;
+        const currentText = activeSession?.pages[currentPage]?.text || '';
+        const newText = currentText.substring(0, start) + text + currentText.substring(end);
+        
+        handlePageTextChange(newText);
+        
+        setTimeout(() => {
+          if (textAreaRef.current) {
+             textAreaRef.current.selectionStart = textAreaRef.current.selectionEnd = start + text.length;
+             textAreaRef.current.focus();
+          }
+        }, 0);
+      } else if (text) {
+        handlePageTextChange((activeSession?.pages[currentPage]?.text || '') + '\n' + text);
+      }
+    } catch (err) {
+      alert("Vui lòng bôi đen văn bản bên trang PDF, nhấn Ctrl+C để copy, sau đó click vào khung soạn thảo và nhấn Ctrl+V để dán.");
+    }
+  };
 
   const saveChanges = async () => {
     if (!activeSession?.id) return;
@@ -487,9 +514,14 @@ export default function App() {
                 {/* PDF Preview Section */}
                 <div className="flex-1 flex flex-col bg-black/40 backdrop-blur-md rounded-2xl border border-white/10 shadow-2xl overflow-hidden relative">
                   <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
-                    <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[10px] font-bold tracking-tighter uppercase flex items-center gap-1">
-                      <FileText className="w-3 h-3" /> Bản gốc PDF
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[10px] font-bold tracking-tighter uppercase flex items-center gap-1">
+                        <FileText className="w-3 h-3" /> Bản gốc PDF
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-900/50 px-2 py-0.5 rounded">
+                        Trang {currentPage + 1} / {activeSession.pages.length}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex-1 relative overflow-hidden bg-slate-900/50">
                     {currentPdfUrl ? (
@@ -556,6 +588,15 @@ export default function App() {
                     
                     <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1 border border-white/5">
                       <button 
+                        onClick={handlePasteFromClipboard} 
+                        className="p-1.5 hover:bg-white/10 rounded-md transition-colors text-slate-300 flex items-center gap-1 px-2"
+                        title="Dán văn bản đã copy từ PDF"
+                      >
+                        <ClipboardPaste className="w-4 h-4 text-purple-400" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider hidden xl:inline-block">Dán text</span>
+                      </button>
+                      <div className="w-px h-4 bg-white/10 mx-1"></div>
+                      <button 
                         onClick={handleUndo} 
                         disabled={!canUndo} 
                         className="p-1.5 hover:bg-white/10 rounded-md disabled:opacity-30 transition-colors text-slate-300"
@@ -576,6 +617,7 @@ export default function App() {
 
                   <div className="flex-1 relative">
                     <textarea 
+                      ref={textAreaRef}
                       className="w-full h-full p-8 bg-transparent text-slate-300 font-serif text-xl leading-relaxed focus:outline-none resize-none custom-scrollbar"
                       onKeyDown={handleKeyDown}
                       value={activeSession.pages[currentPage].text}
