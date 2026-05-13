@@ -19,13 +19,14 @@ import {
   Plus,
   Undo2,
   Redo2,
-  ClipboardPaste
+  ClipboardPaste,
+  Share2
 } from 'lucide-react';
 import { auth, signIn, signOut } from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { extractTextFromPDF, PageContent } from './services/pdfService';
 import { generateAudioFromText, TTSOptions, VoiceName } from './services/ttsService';
-import { createSession, getSessions, updateSession, deleteSession, ReadingSession, getVoices, createVoice, deleteVoice, updateVoice, CustomVoice } from './services/dbService';
+import { createSession, getSessions, updateSession, deleteSession, ReadingSession, getVoices, createVoice, deleteVoice, updateVoice, CustomVoice, getSharedSession, updateSessionSharing } from './services/dbService';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -54,12 +55,33 @@ export default function App() {
 
   const [currentPdfUrl, setCurrentPdfUrl] = useState<string | null>(null);
   const [isQuickPreviewing, setIsQuickPreviewing] = useState(false);
+  const [isSharedLoading, setIsSharedLoading] = useState(false);
 
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
   const lastSavedTextRef = useRef('');
   const typingTimeoutRef = useRef<any>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedId = params.get('sharedSessionId');
+    if (sharedId) {
+      loadSharedSession(sharedId);
+    }
+  }, []);
+
+  const loadSharedSession = async (id: string) => {
+    setIsSharedLoading(true);
+    const session = await getSharedSession(id);
+    if (session) {
+      setActiveSession(session);
+      setCurrentPage(0);
+    } else {
+      alert("Không tìm thấy dữ liệu chia sẻ hoặc bạn không có quyền truy cập.");
+    }
+    setIsSharedLoading(false);
+  };
 
   useEffect(() => {
     if (activeSession) {
@@ -436,13 +458,38 @@ export default function App() {
           <div className="flex items-center gap-4">
             {activeSession ? (
               <>
-                <h2 className="font-semibold text-lg text-white max-w-md truncate">{activeSession.fileName}</h2>
+                <h2 className="font-semibold text-lg text-white max-w-md truncate">
+                  {user?.uid !== activeSession.userId && <span className="text-purple-400 font-bold mr-2 text-[10px] uppercase bg-purple-500/20 px-2 py-0.5 rounded">Chỉ Xem</span>}
+                  {activeSession.fileName}
+                </h2>
                 <button 
                   onClick={saveChanges}
-                  className="text-[10px] uppercase tracking-wider font-bold px-3 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded hover:bg-blue-500/20 transition-colors"
+                  disabled={user?.uid !== activeSession.userId}
+                  className="text-[10px] uppercase tracking-wider font-bold px-3 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+                  title={user?.uid !== activeSession.userId ? "Bạn không thể lưu trên bản nháp của người khác" : ""}
                 >
                   Lưu bản chỉnh sửa
                 </button>
+                {activeSession.userId === user?.uid && (
+                  <button 
+                    onClick={async () => {
+                      const newShared = !activeSession.isShared;
+                      await updateSessionSharing(activeSession.id!, newShared);
+                      setActiveSession({...activeSession, isShared: newShared});
+                      if (newShared) {
+                        const url = `${window.location.origin}${window.location.pathname}?sharedSessionId=${activeSession.id}`;
+                        navigator.clipboard.writeText(url);
+                        alert(`Đã bật chia sẻ. Link đã được copy vào clipboard:\n${url}`);
+                      } else {
+                        alert("Đã tắt chia sẻ.");
+                      }
+                    }}
+                    className={cn("text-[10px] uppercase tracking-wider font-bold px-3 py-1 border rounded transition-colors flex items-center gap-1", activeSession.isShared ? "bg-green-500/10 border-green-500/20 text-green-400 hover:bg-green-500/20" : "bg-purple-500/10 border-purple-500/20 text-purple-400 hover:bg-purple-500/20")}
+                  >
+                    <Share2 className="w-3 h-3" />
+                    {activeSession.isShared ? "Đang chia sẻ" : "Chia sẻ"}
+                  </button>
+                )}
               </>
             ) : (
               <h2 className="font-semibold text-lg text-slate-400">Trình đọc PDF AI</h2>
@@ -589,7 +636,8 @@ export default function App() {
                     <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1 border border-white/5">
                       <button 
                         onClick={handlePasteFromClipboard} 
-                        className="p-1.5 hover:bg-white/10 rounded-md transition-colors text-slate-300 flex items-center gap-1 px-2"
+                        disabled={user?.uid !== activeSession.userId}
+                        className="p-1.5 hover:bg-white/10 rounded-md transition-colors text-slate-300 flex items-center gap-1 px-2 disabled:opacity-30 disabled:cursor-not-allowed"
                         title="Dán văn bản đã copy từ PDF"
                       >
                         <ClipboardPaste className="w-4 h-4 text-purple-400" />
@@ -598,7 +646,7 @@ export default function App() {
                       <div className="w-px h-4 bg-white/10 mx-1"></div>
                       <button 
                         onClick={handleUndo} 
-                        disabled={!canUndo} 
+                        disabled={!canUndo || user?.uid !== activeSession.userId} 
                         className="p-1.5 hover:bg-white/10 rounded-md disabled:opacity-30 transition-colors text-slate-300"
                         title="Hoàn tác (Ctrl+Z)"
                       >
@@ -606,7 +654,7 @@ export default function App() {
                       </button>
                       <button 
                         onClick={handleRedo} 
-                        disabled={!canRedo} 
+                        disabled={!canRedo || user?.uid !== activeSession.userId} 
                         className="p-1.5 hover:bg-white/10 rounded-md disabled:opacity-30 transition-colors text-slate-300"
                         title="Làm lại (Ctrl+Y)"
                       >
@@ -619,6 +667,7 @@ export default function App() {
                     <textarea 
                       ref={textAreaRef}
                       className="w-full h-full p-8 bg-transparent text-slate-300 font-serif text-xl leading-relaxed focus:outline-none resize-none custom-scrollbar"
+                      readOnly={user?.uid !== activeSession.userId}
                       onKeyDown={handleKeyDown}
                       value={activeSession.pages[currentPage].text}
                       onChange={(e) => handlePageTextChange(e.target.value)}

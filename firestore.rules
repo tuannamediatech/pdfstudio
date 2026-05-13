@@ -42,7 +42,7 @@ service cloud.firestore {
       }
 
       // Simplified read rules
-      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow read: if (resource != null && resource.data.get('isShared', false) == true) || (isSignedIn() && (resource == null || resource.data.userId == request.auth.uid));
       
       allow create: if isSignedIn() 
                     && isEmailVerified()
@@ -56,8 +56,8 @@ service cloud.firestore {
                     && incoming().userId == existing().userId
                     && incoming().createdAt == existing().createdAt
                     && (
-                      // Action: Edit text
-                      incoming().diff(existing()).affectedKeys().hasOnly(['pages', 'updatedAt', 'settings'])
+                      // Action: Edit text or sharing
+                      incoming().diff(existing()).affectedKeys().hasOnly(['pages', 'updatedAt', 'settings', 'isShared'])
                     );
                     
       allow delete: if isSignedIn() && isOwner(existing().userId);

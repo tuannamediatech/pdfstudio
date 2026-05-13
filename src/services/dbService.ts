@@ -8,6 +8,7 @@ import {
   where, 
   orderBy, 
   limit,
+  getDoc,
   getDocs,
   Timestamp,
   serverTimestamp
@@ -32,6 +33,7 @@ export interface ReadingSession {
   createdAt: any;
   updatedAt?: any;
   settings: TTSOptions;
+  isShared?: boolean;
 }
 
 enum OperationType {
@@ -123,6 +125,32 @@ export async function deleteSession(sessionId: string) {
     await deleteDoc(doc(db, 'sessions', sessionId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `sessions/${sessionId}`);
+  }
+}
+
+export async function updateSessionSharing(sessionId: string, isShared: boolean) {
+  const docRef = doc(db, 'sessions', sessionId);
+  try {
+    await updateDoc(docRef, {
+      isShared,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `sessions/${sessionId}`);
+  }
+}
+
+export async function getSharedSession(sessionId: string): Promise<ReadingSession | null> {
+  const docRef = doc(db, 'sessions', sessionId);
+  try {
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return { id: docSnap.id, ...docSnap.data() } as ReadingSession;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `sessions/${sessionId}`);
+    return null;
   }
 }
 

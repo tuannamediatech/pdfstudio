@@ -20,6 +20,7 @@
         },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" },
+        "isShared": { "type": "boolean", "description": "Whether the session is publicly readable" },
         "settings": {
           "type": "object",
           "properties": {
