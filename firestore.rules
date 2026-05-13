@@ -69,7 +69,8 @@ service cloud.firestore {
         return data.userId == request.auth.uid
             && data.name is string && data.name.size() <= 100
             && data.sampleBase64 is string && data.sampleBase64.size() <= 800000 // approx 600KB base64
-            && data.createdAt is timestamp;
+            && data.createdAt is timestamp
+            && (data.order == null || data.order is number);
       }
 
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
@@ -81,7 +82,7 @@ service cloud.firestore {
                     && incoming().userId == existing().userId
                     && incoming().createdAt == existing().createdAt
                     && incoming().sampleBase64 == existing().sampleBase64
-                    && incoming().diff(existing()).affectedKeys().hasOnly(['name']);
+                    && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'order']);
       allow delete: if isSignedIn() && isOwner(existing().userId);
     }
   }

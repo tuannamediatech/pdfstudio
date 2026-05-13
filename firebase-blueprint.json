@@ -41,7 +41,8 @@
         "userId": { "type": "string" },
         "name": { "type": "string" },
         "sampleBase64": { "type": "string", "description": "Base64 encoded audio sample (max 500KB)." },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "order": { "type": "number", "description": "Order of the voice in the list." }
       },
       "required": ["userId", "name", "sampleBase64", "createdAt"]
     }

@@ -23,6 +23,7 @@ export interface CustomVoice {
   name: string;
   sampleBase64: string;
   createdAt: any;
+  order?: number;
 }
 
 export interface ReadingSession {
@@ -185,13 +186,30 @@ export async function getVoices() {
       orderBy("createdAt", "desc")
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({
+    const results = snapshot.docs.map(d => ({
       id: d.id,
       ...d.data()
     })) as CustomVoice[];
+    
+    // Client-side sort by order if it exists, fallback to createdAt desc
+    return results.sort((a, b) => {
+      const orderA = a.order ?? Number.MAX_SAFE_INTEGER;
+      const orderB = b.order ?? Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+      return b.createdAt.toMillis() - a.createdAt.toMillis();
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
     return [];
+  }
+}
+
+export async function updateVoiceOrder(voiceUpdates: { id: string, order: number }[]) {
+  try {
+    const promises = voiceUpdates.map(v => updateDoc(doc(db, 'voices', v.id), { order: v.order }));
+    await Promise.all(promises);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `voices/order-update`);
   }
 }
 

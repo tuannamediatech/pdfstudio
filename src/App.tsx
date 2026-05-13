@@ -20,13 +20,14 @@ import {
   Undo2,
   Redo2,
   ClipboardPaste,
-  Share2
+  Share2,
+  GripVertical
 } from 'lucide-react';
 import { auth, signIn, signOut } from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { extractTextFromPDF, PageContent } from './services/pdfService';
 import { generateAudioFromText, TTSOptions, VoiceName } from './services/ttsService';
-import { createSession, getSessions, updateSession, deleteSession, ReadingSession, getVoices, createVoice, deleteVoice, updateVoice, CustomVoice, getSharedSession, updateSessionSharing } from './services/dbService';
+import { createSession, getSessions, updateSession, deleteSession, ReadingSession, getVoices, createVoice, deleteVoice, updateVoice, updateVoiceOrder, CustomVoice, getSharedSession, updateSessionSharing } from './services/dbService';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -44,6 +45,7 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<ReadingSession | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [isCloning, setIsCloning] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
@@ -63,6 +65,23 @@ export default function App() {
   const typingTimeoutRef = useRef<any>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const autoSaveTimeoutRef = useRef<any>(null);
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
+
+  const handleSort = async () => {
+    if (dragItem.current !== null && dragOverItem.current !== null && dragItem.current !== dragOverItem.current) {
+      const newVoices = [...voices];
+      const draggedVoice = newVoices.splice(dragItem.current, 1)[0];
+      newVoices.splice(dragOverItem.current, 0, draggedVoice);
+      setVoices(newVoices);
+      
+      const updates = newVoices.map((v, idx) => ({ id: v.id!, order: idx }));
+      dragItem.current = null;
+      dragOverItem.current = null;
+      
+      await updateVoiceOrder(updates);
+    }
+  };
 
   const debounceAutoSave = (sessionId: string, pages: any[], settings: any) => {
     // Prevent auto-saving if user does not own the session
@@ -160,11 +179,17 @@ export default function App() {
     if (!file || !user) return;
 
     setIsUploading(true);
+    setUploadProgress(0);
     try {
+      if (currentPdfUrl) {
+        URL.revokeObjectURL(currentPdfUrl);
+      }
       const url = URL.createObjectURL(file);
       setCurrentPdfUrl(url);
 
-      const pages = await extractTextFromPDF(file);
+      const pages = await extractTextFromPDF(file, (progress) => {
+        setUploadProgress(progress);
+      });
       const sessionId = await createSession(file.name, pages);
       if (sessionId) {
         const newSession: ReadingSession = {
@@ -310,27 +335,67 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !user) return;
     
-    if (file.size > 500 * 1024) {
-      alert("File mẫu giọng nói quá lớn (tối đa 500KB)");
+    const validFormats = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/m4a', 'audio/x-m4a', 'audio/ogg', 'video/mp4'];
+    // Allow standard audio files
+    const isSupported = validFormats.includes(file.type) || file.name.match(/\.(wav|mp3|m4a|ogg)$/i);
+    
+    if (!isSupported) {
+      alert("Định dạng file không được hỗ trợ. Vui lòng tải lên file WAV, MP3, M4A hoặc OGG.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert("File mẫu giọng nói quá lớn (tối đa 5MB)");
       return;
     }
 
     setIsCloning(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const voiceId = await createVoice(file.name.split('.')[0], base64);
-        if (voiceId) {
-          fetchVoices();
-          alert("Đã nhân bản giọng nói thành công!");
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (error) {
+      const audioUrl = URL.createObjectURL(file);
+      const audio = new Audio(audioUrl);
+      
+      await new Promise((resolve, reject) => {
+        audio.onloadedmetadata = () => {
+          if (audio.duration < 5) {
+             reject(new Error("TOO_SHORT"));
+          } else if (audio.duration > 300) {
+             reject(new Error("TOO_LONG"));
+          } else {
+             resolve(null);
+          }
+        };
+        audio.onerror = () => reject(new Error("INVALID_AUDIO"));
+        // Timeout in case metadata never loads
+        setTimeout(() => reject(new Error("TIMEOUT")), 5000);
+      });
+      URL.revokeObjectURL(audioUrl);
+
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = () => reject(new Error("READ_ERROR"));
+        reader.readAsDataURL(file);
+      });
+
+      const voiceId = await createVoice(file.name.split('.')[0], base64);
+      if (voiceId) {
+        fetchVoices();
+        alert("Đã nhân bản giọng nói thành công!");
+      }
+    } catch (error: any) {
       console.error("Cloning failed", error);
+      if (error.message === 'TOO_SHORT') {
+         alert("Mẫu giọng nói quá ngắn. Vui lòng cung cấp đoạn âm thanh dài ít nhất 5 giây.");
+      } else if (error.message === 'TOO_LONG') {
+         alert("Mẫu giọng nói quá dài. Mẫu tốt nhất nên từ 5-300 giây.");
+      } else if (error.message === 'INVALID_AUDIO' || error.message === 'READ_ERROR' || error.message === 'TIMEOUT') {
+         alert("Không thể đọc file âm thanh này. File có thể bị hỏng hoặc định dạng không được trình duyệt hỗ trợ.");
+      } else {
+         alert("Đã xảy ra lỗi trong quá trình xử lý giọng nói.");
+      }
     } finally {
       setIsCloning(false);
+      e.target.value = '';
     }
   };
 
@@ -536,12 +601,20 @@ export default function App() {
                 <label 
                   htmlFor="pdf-upload"
                   className={cn(
-                    "flex items-center gap-2 bg-blue-600 text-white px-5 py-2 rounded-lg font-medium cursor-pointer hover:bg-blue-500 transition-all shadow-lg shadow-blue-500/20",
-                    isUploading && "opacity-50 cursor-not-allowed"
+                    "relative flex items-center gap-2 bg-blue-600 text-white px-5 py-2 rounded-lg font-medium cursor-pointer transition-all shadow-lg shadow-blue-500/20 overflow-hidden",
+                    isUploading ? "opacity-90 cursor-not-allowed" : "hover:bg-blue-500"
                   )}
                 >
-                  {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                  {isUploading ? "Đang xử lý..." : "Tải lên PDF"}
+                  {isUploading && (
+                    <div 
+                      className="absolute left-0 top-0 bottom-0 bg-blue-500 transition-all duration-300 pointer-events-none"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  )}
+                  <span className="relative z-10 flex items-center gap-2 pointer-events-none">
+                    {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {isUploading ? `Đang xử lý ${uploadProgress}%...` : "Tải lên PDF"}
+                  </span>
                 </label>
               </div>
             )}
@@ -592,7 +665,7 @@ export default function App() {
                   <div className="flex-1 relative overflow-hidden bg-slate-900/50">
                     {currentPdfUrl ? (
                       <iframe 
-                        key={`${currentPdfUrl}-${currentPage}`}
+                        key={currentPdfUrl}
                         src={`${currentPdfUrl}#page=${currentPage + 1}`}
                         className="w-full h-full border-none"
                         title="PDF Preview"
@@ -739,10 +812,19 @@ export default function App() {
                               </p>
                               
                               <div className="flex flex-col gap-2">
-                                {voices.map(v => (
-                                  <div key={v.id} className="flex flex-col bg-white/5 p-2 rounded-lg border border-white/5 group gap-2">
+                                {voices.map((v, index) => (
+                                  <div 
+                                    key={v.id} 
+                                    draggable
+                                    onDragStart={() => (dragItem.current = index)}
+                                    onDragEnter={() => (dragOverItem.current = index)}
+                                    onDragEnd={handleSort}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    className="flex flex-col bg-white/5 p-2 rounded-lg border border-white/5 group gap-2 cursor-grab active:cursor-grabbing"
+                                  >
                                     {editingVoiceId === v.id ? (
                                       <div className="flex items-center justify-between gap-2">
+                                        <GripVertical className="w-3 h-3 text-slate-600 shrink-0 cursor-grab" />
                                         <input 
                                           type="text" 
                                           autoFocus
@@ -776,6 +858,7 @@ export default function App() {
                                           }}
                                           title="Nhấn để đổi tên"
                                         >
+                                          <GripVertical className="w-3 h-3 text-slate-600 shrink-0 cursor-grab hover:text-slate-400 transition-colors" />
                                           <Mic className="w-3 h-3 text-blue-400 shrink-0" />
                                           <span className="text-[10px] truncate text-slate-200 group-hover/name:text-white transition-colors">{v.name}</span>
                                         </div>
