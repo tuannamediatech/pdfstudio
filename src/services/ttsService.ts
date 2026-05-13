@@ -40,15 +40,17 @@ Văn bản cần đọc: "${text}"`,
         },
       });
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      const base64Audio = inlineData?.data;
+      const mimeType = inlineData?.mimeType || 'audio/wav';
       if (!base64Audio) throw new Error("No audio data generated (cloning)");
 
-      return base64ToBlobUrl(base64Audio);
+      return base64ToBlobUrl(base64Audio, mimeType);
     } else {
       // Standard TTS
       const response = await ai.models.generateContent({
         model: "gemini-3.1-flash-tts-preview",
-        contents: [{ parts: [{ text: `Đọc văn bản này (tốc độ ${options.speed}x, cao độ ${options.pitch}): ${text}` }] }],
+        contents: [{ parts: [{ text: text }] }],
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
@@ -59,10 +61,12 @@ Văn bản cần đọc: "${text}"`,
         },
       });
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      const base64Audio = inlineData?.data;
+      const mimeType = inlineData?.mimeType || 'audio/wav';
       if (!base64Audio) throw new Error("No audio data generated");
 
-      return base64ToBlobUrl(base64Audio);
+      return base64ToBlobUrl(base64Audio, mimeType);
     }
   } catch (error) {
     console.error("TTS generation failed", error);
@@ -70,12 +74,54 @@ Văn bản cần đọc: "${text}"`,
   }
 }
 
-function base64ToBlobUrl(base64: string): string {
+function base64ToBlobUrl(base64: string, mimeType: string = 'audio/wav'): string {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
-  const blob = new Blob([bytes], { type: 'audio/mpeg' });
+
+  let finalBytes = bytes;
+
+  // If it's raw PCM, wrap it in a WAV header so the browser's <audio> element can play it natively.
+  if (mimeType.includes("audio/pcm")) {
+    let sampleRate = 24000;
+    const match = mimeType.match(/rate=(\d+)/);
+    if (match) {
+      sampleRate = parseInt(match[1], 10);
+    }
+    
+    const numChannels = 1; // mono
+    const bitsPerSample = 16; // 16-bit
+    const wavHeader = new ArrayBuffer(44);
+    const view = new DataView(wavHeader);
+    
+    const writeString = (view: DataView, offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + bytes.length, true);
+    writeString(view, 8, 'WAVE');
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * 2, true);
+    view.setUint16(32, numChannels * 2, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(view, 36, 'data');
+    view.setUint32(40, bytes.length, true);
+
+    finalBytes = new Uint8Array(44 + bytes.length);
+    finalBytes.set(new Uint8Array(wavHeader), 0);
+    finalBytes.set(bytes, 44);
+    mimeType = 'audio/wav';
+  }
+
+  const blob = new Blob([finalBytes], { type: mimeType });
   return URL.createObjectURL(blob);
 }
