@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "ReadingSession": {
+      "title": "Reading Session",
+      "description": "A record of a PDF file's text extraction and audio generation history.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user who owns this record." },
+        "fileName": { "type": "string", "description": "Original name of the PDF file." },
+        "pages": { 
+          "type": "array", 
+          "items": {
+            "type": "object",
+            "properties": {
+              "pageNumber": { "type": "integer" },
+              "text": { "type": "string" }
+            }
+          },
+          "description": "Extracted and edited text content per page."
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "voice": { "type": "string" },
+            "speed": { "type": "number" },
+            "pitch": { "type": "number" },
+            "clonedVoiceId": { "type": "string", "description": "Reference to a custom cloned voice." }
+          }
+        }
+      },
+      "required": ["userId", "fileName", "pages", "createdAt"]
+    },
+    "CustomVoice": {
+      "title": "Custom Voice",
+      "description": "A cloned voice profile created from a user-uploaded sample.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "sampleBase64": { "type": "string", "description": "Base64 encoded audio sample (max 500KB)." },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "sampleBase64", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/sessions": {
+      "schema": "ReadingSession",
+      "description": "Collection of user reading sessions and extracted text."
+    },
+    "/voices": {
+      "schema": "CustomVoice",
+      "description": "Collection of custom cloned voices."
+    }
+  }
+}

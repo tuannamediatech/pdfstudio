@@ -1,0 +1,6 @@
+{
+  "name": "PDF AI Reader & Audio Studio",
+  "description": "Convert PDF documents to editable text and high-quality AI-generated audio. Features page-by-page editing, adjustable voice settings, and reading history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
